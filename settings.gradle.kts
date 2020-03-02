@@ -1,1 +1,1 @@
-rootProject.name = "KSL20-IB-DEMO-BACKEND"
+rootProject.name = "ksl20-ib-demo-backend"
