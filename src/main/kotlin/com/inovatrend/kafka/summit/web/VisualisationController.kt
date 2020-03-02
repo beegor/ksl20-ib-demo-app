@@ -3,14 +3,17 @@ package com.inovatrend.kafka.summit.web
 import com.inovatrend.kafka.summit.ConsumerAppImpl
 import com.inovatrend.kafka.summit.service.ConsumerApp
 import com.inovatrend.kafka.summit.service.SampleProducer
-import com.inovatrend.kafka.summit.service.sample01.ForkJoinConsumerApp
-import com.inovatrend.kafka.summit.service.sample01.ForkJoinSampleProducer
+import com.inovatrend.kafka.summit.service.fork_join.ForkJoinConsumerApp
+import com.inovatrend.kafka.summit.service.fully_decoupled.FullyDecoupledConsumerApp
 import com.inovatrend.kafka.summit.web.data.ConsumingStateData
 import com.inovatrend.kafka.summit.web.data.PollInfo
 import com.inovatrend.kafka.summit.web.data.WorkerInfo
 import org.slf4j.LoggerFactory
 import org.springframework.ui.Model
-import org.springframework.web.bind.annotation.*
+import org.springframework.web.bind.annotation.CrossOrigin
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RestController
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -38,14 +41,22 @@ class VisualisationController {
         consumerApp?.stopConsuming()
         producer?.stopProducing()
 
-        when(impl) {
+        when (impl) {
             ConsumerAppImpl.FORK_JOIN -> {
                 log.info("Starting FORK JOIN implementation")
-                consumerApp = ForkJoinConsumerApp("fork-join-demo", "fork-join-input-topic", 1000)
-                producer = ForkJoinSampleProducer("fork-join-input-topic", 1)
+                consumerApp = ForkJoinConsumerApp("ksl20-demo", "ksl20-input-topic", 1000)
+                producer = SampleProducer("ksl20-input-topic", 1)
                 consumerApp?.startConsuming()
                 producer?.startProducing()
             }
+            ConsumerAppImpl.FULLY_DECOUPLED -> {
+                log.info("Starting FULLY DECOUPLED implementation")
+                consumerApp = FullyDecoupledConsumerApp("ksl20-demo", "ksl20-input-topic", 1000)
+                producer = SampleProducer("ksl20-input-topic", 1)
+                consumerApp?.startConsuming()
+                producer?.startProducing()
+            }
+
         }
         return mapOf(Pair("result", "OK"))
     }
@@ -79,7 +90,7 @@ class VisualisationController {
     fun getWorkersInfo() : ConsumingStateData {
         val workers = consumerApp?.getActiveWorkers() ?: listOf()
         val lastPollRecordsCount = consumerApp?.getLastPollRecordsCount() ?: 0
-        return ConsumingStateData( workers.map { WorkerInfo(it) }, lastPollRecordsCount )
+        return ConsumingStateData(workers.map { WorkerInfo(it) }, lastPollRecordsCount, producer?.produceSpeedMsgPerSec, consumerApp?.getRecordProcessingDuration())
     }
 
 

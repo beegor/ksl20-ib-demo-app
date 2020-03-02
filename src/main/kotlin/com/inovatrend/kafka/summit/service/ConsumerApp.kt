@@ -19,11 +19,11 @@ interface ConsumerApp {
      */
     fun getActiveWorkers() : List<RecordProcessingTask>
 
-
     fun getLastPollRecordsCount(): Int
 
     fun getPollHistory(): List<LocalDateTime>
 
+    fun getRecordProcessingDuration(): Int
 
     fun updateRecordProcessingDuration(durationMs: Int)
 }

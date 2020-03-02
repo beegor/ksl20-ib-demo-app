@@ -4,8 +4,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 
 @SpringBootApplication
-class PresentationAppApplication
+class KSL20DemoApplication
 
 fun main(args: Array<String>) {
-	runApplication<PresentationAppApplication>(*args)
+    runApplication<KSL20DemoApplication>(*args)
 }

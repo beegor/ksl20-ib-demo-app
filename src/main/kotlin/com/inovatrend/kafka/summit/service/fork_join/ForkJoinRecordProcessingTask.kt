@@ -1,4 +1,4 @@
-package com.inovatrend.kafka.summit.service.sample01
+package com.inovatrend.kafka.summit.service.fork_join
 
 import com.inovatrend.kafka.summit.service.RecordProcessingTask
 import org.apache.kafka.clients.consumer.ConsumerRecord
@@ -7,12 +7,13 @@ import org.slf4j.LoggerFactory
 import java.util.concurrent.Callable
 import java.util.concurrent.atomic.AtomicLong
 
-class ForkJoinRecordProcessingTask(private val partition:TopicPartition, private val records: List<ConsumerRecord<String, String>>, var singleMsgProcessingDurationMs: Int) : Callable<Int>, RecordProcessingTask {
+class ForkJoinRecordProcessingTask(private val partition: TopicPartition,
+                                   private val records: List<ConsumerRecord<String, String>>,
+                                   var singleMsgProcessingDurationMs: Int) : Callable<Int>, RecordProcessingTask {
 
     private val log = LoggerFactory.getLogger(ForkJoinRecordProcessingTask::class.java)
     private val currentOffset = AtomicLong()
     private var processedRecordsCount = 0
-    private var threadName = ""
 
 
     init {
@@ -20,8 +21,6 @@ class ForkJoinRecordProcessingTask(private val partition:TopicPartition, private
     }
 
     override fun call(): Int {
-        this.threadName = Thread.currentThread().name
-        log.info("call Thread name: {}", this.threadName)
         records.forEach { record ->
             processRecord(record)
             currentOffset.set(record.offset())
@@ -36,11 +35,14 @@ class ForkJoinRecordProcessingTask(private val partition:TopicPartition, private
         Thread.sleep(singleMsgProcessingDurationMs.toLong())
     }
 
+    override fun updateRecordProcessingDuration(durationMs: Int) {
+        this.singleMsgProcessingDurationMs = durationMs
+    }
+
     override fun getTotalRecords() = records.size
 
     override fun getProcessedRecords() = processedRecordsCount
 
     override fun getTopicPartition() = partition
 
-    override fun getThreadName() = threadName
 }

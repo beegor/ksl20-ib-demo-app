@@ -1,12 +1,12 @@
-package com.inovatrend.kafka.summit.service.sample01
+package com.inovatrend.kafka.summit.service.fork_join
 
 import com.inovatrend.kafka.summit.service.ConsumerApp
+import com.inovatrend.kafka.summit.service.RecordProcessingTask
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.common.errors.WakeupException
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.slf4j.LoggerFactory
-import java.lang.Exception
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
@@ -15,22 +15,25 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
-class ForkJoinConsumerApp (consumerGroup: String, private val topic: String, var recordProcessingDurationMs: Int) : ConsumerApp {
+class ForkJoinConsumerApp(consumerGroup: String,
+                          private val topic: String,
+                          private var recordProcessingDurationMs: Int) : ConsumerApp {
 
-    private val consumer : KafkaConsumer<String, String>
+    private val consumer: KafkaConsumer<String, String>
     private val stopped = AtomicBoolean(false)
     private val executor = Executors.newWorkStealingPool(10)
-    private val activeWorkers = mutableListOf<ForkJoinRecordProcessingTask>()
+    private val activeWorkers = mutableListOf<RecordProcessingTask>()
     private var lastPollRecordsCount = 0
     private val pollHistory = mutableListOf<LocalDateTime>()
     private val log = LoggerFactory.getLogger(ForkJoinConsumerApp::class.java)
 
     init {
         val config = Properties()
-        config[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092";
-        config[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java;
-        config[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java;
+        config[ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG] = "localhost:9092"
+        config[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
+        config[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
         config[ConsumerConfig.GROUP_ID_CONFIG] = consumerGroup
+        config[ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG] = 2000
         consumer = KafkaConsumer(config)
     }
 
@@ -46,8 +49,7 @@ class ForkJoinConsumerApp (consumerGroup: String, private val topic: String, var
                     val tasks = records.partitions().map { partition ->
                         val partitionRecords = records.records(partition)
                         val worker = ForkJoinRecordProcessingTask(partition, partitionRecords, recordProcessingDurationMs)
-                        activeWorkers.add(worker)
-                        worker
+                        worker.apply { activeWorkers.add(this) }
                     }
                     log.info("Invoking executors start, tasks : {}", tasks.size)
                     executor.invokeAll(tasks)
@@ -71,7 +73,7 @@ class ForkJoinConsumerApp (consumerGroup: String, private val topic: String, var
     }
 
 
-    override fun stopConsuming(){
+    override fun stopConsuming() {
         stopped.set(true)
         consumer.wakeup()
     }
@@ -81,15 +83,15 @@ class ForkJoinConsumerApp (consumerGroup: String, private val topic: String, var
 
     override fun getLastPollRecordsCount() = this.lastPollRecordsCount
 
+    override fun getRecordProcessingDuration() = this.recordProcessingDurationMs
+
     override fun updateRecordProcessingDuration(durationMs: Int) {
         log.info("Updating record processing duration: {} ms", durationMs)
         this.recordProcessingDurationMs = durationMs
-        for (worker in activeWorkers.toList()) {
-            worker.singleMsgProcessingDurationMs = durationMs
-        }
+        activeWorkers.forEach { it.updateRecordProcessingDuration(durationMs) }
     }
 
-    override fun getPollHistory() =  pollHistory.toList()
+    override fun getPollHistory() = pollHistory.toList()
 
 
 }

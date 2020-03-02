@@ -1,1 +1,1 @@
-rootProject.name = "PresentationApp"
+rootProject.name = "KSL20-IB-DEMO-BACKEND"

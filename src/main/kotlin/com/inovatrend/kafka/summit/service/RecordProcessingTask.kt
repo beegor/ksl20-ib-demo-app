@@ -6,5 +6,5 @@ interface RecordProcessingTask {
     fun getTotalRecords(): Int
     fun getProcessedRecords(): Int
     fun getTopicPartition(): TopicPartition
-    fun getThreadName(): String
+    fun updateRecordProcessingDuration(durationMs: Int)
 }
