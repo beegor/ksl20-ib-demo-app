@@ -3,9 +3,7 @@ package com.inovatrend.kafka.summit.service.fully_decoupled
 import com.inovatrend.kafka.summit.service.ConsumerApp
 import com.inovatrend.kafka.summit.service.RecordProcessingTask
 import com.inovatrend.kafka.summit.service.RecordProcessingTaskListener
-import org.apache.kafka.clients.consumer.ConsumerConfig
-import org.apache.kafka.clients.consumer.KafkaConsumer
-import org.apache.kafka.clients.consumer.OffsetAndMetadata
+import org.apache.kafka.clients.consumer.*
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.WakeupException
 import org.apache.kafka.common.serialization.StringDeserializer
@@ -49,28 +47,18 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
     override fun startConsuming() {
         thread {
             try {
-                consumer.subscribe(Collections.singleton(topic))
+                consumer.subscribe(Collections.singleton(topic), object : ConsumerRebalanceListener {
+                    override fun onPartitionsAssigned(partitions: Collection<TopicPartition>) = partitionsAssigned(partitions)
+                    override fun onPartitionsRevoked(partitions: Collection<TopicPartition>) = partitionsRevoked(partitions)
+                })
 
                 while (!stopped.get()) {
-
                     val records = consumer.poll(Duration.of(1000, ChronoUnit.MILLIS))
-
                     updatePollMetrics(records.count())
-
-                    records.partitions().forEach { partition ->
-                        val partitionRecords = records.records(partition)
-                        val worker = FullyDecoupledRecordProcessingTask(partition, partitionRecords, recordProcessingDurationMs, this)
-                        consumer.pause(listOf(partition))
-                        activeWorkers[partition] = worker
-                        executor.submit(worker)
-                    }
-
+                    handleFetchedRecords(records)
                     commitOffsetsIfTimeHasCome()
-
                     resumePartitions()
-
                     Thread.sleep(100)
-
                 }
             } catch (we: WakeupException) {
                 if (!stopped.get()) throw we
@@ -82,6 +70,25 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
         }
     }
 
+    /**
+     * Called from main consumer thread.
+     * Groups records by partitions, creates tasks and submits them to executor
+     */
+    private fun handleFetchedRecords(records: ConsumerRecords<String, String>) {
+        records.partitions().forEach { partition ->
+            val partitionRecords = records.records(partition)
+            val worker = FullyDecoupledRecordProcessingTask(partition, partitionRecords, recordProcessingDurationMs, this)
+            consumer.pause(listOf(partition))
+            activeWorkers[partition] = worker
+            executor.submit(worker)
+        }
+    }
+
+    /**
+     * Called from main consumer thread.
+     * Updates last poll time and number of fetched records to local variables
+     * Used for visualisation purposes
+     */
     private fun updatePollMetrics(recordsCount: Int) {
         val now = LocalDateTime.now()
         pollHistory.add(now)
@@ -123,6 +130,29 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
         log.info("Stopping consumer app!")
         stopped.set(true)
         consumer.wakeup()
+    }
+
+    private fun partitionsRevoked(partitions: Collection<TopicPartition>) {
+
+        log.info("Partitions revoked: {}", partitions)
+        val revokedPartitionOffsets = mutableMapOf<TopicPartition, OffsetAndMetadata>()
+        for (partition in partitions) {
+            val task = activeWorkers[partition]
+            task?.stop()
+            val offset = offsetsToCommit.remove(partition)
+            if (offset != null)
+                revokedPartitionOffsets[partition] = offset
+        }
+        try {
+            consumer.commitSync(revokedPartitionOffsets)
+        } catch (e: Exception) {
+            // todo Offsets commit failed! Is there something I can do about it? Nothing, I guess.
+            log.warn("Failed to commit offsets for revoked partitions!")
+        }
+    }
+
+    private fun partitionsAssigned(partitions: Collection<TopicPartition>) {
+        log.info("Partitions assigned: {}", partitions)
     }
 
     override fun getActiveWorkers() = activeWorkers.values.toList()

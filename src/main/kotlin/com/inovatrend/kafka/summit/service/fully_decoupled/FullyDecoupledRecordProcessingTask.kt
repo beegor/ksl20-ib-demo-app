@@ -20,10 +20,6 @@ class FullyDecoupledRecordProcessingTask(private val partition: TopicPartition,
     private val completition = CompletableFuture<Boolean>()
 
 
-    init {
-        log.info("init Thread name: {}", Thread.currentThread().name)
-    }
-
     override fun run() {
 
         for (record in records) {
@@ -38,7 +34,7 @@ class FullyDecoupledRecordProcessingTask(private val partition: TopicPartition,
         completition.complete(true)
     }
 
-    fun stop() {
+    override fun stop() {
         this.stopped = true
         completition.get()
     }

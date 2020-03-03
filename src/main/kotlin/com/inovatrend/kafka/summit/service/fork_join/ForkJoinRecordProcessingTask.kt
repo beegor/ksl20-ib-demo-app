@@ -14,14 +14,12 @@ class ForkJoinRecordProcessingTask(private val partition: TopicPartition,
     private val log = LoggerFactory.getLogger(ForkJoinRecordProcessingTask::class.java)
     private val currentOffset = AtomicLong()
     private var processedRecordsCount = 0
+    private var stopped = false
 
-
-    init {
-        log.info("init Thread name: {}", Thread.currentThread().name)
-    }
 
     override fun call(): Int {
-        records.forEach { record ->
+        for (record in records) {
+            if (stopped) break
             processRecord(record)
             currentOffset.set(record.offset())
             processedRecordsCount++
@@ -33,6 +31,10 @@ class ForkJoinRecordProcessingTask(private val partition: TopicPartition,
     private fun processRecord(record: ConsumerRecord<String, String>) {
         log.info("Processing record: {}", record)
         Thread.sleep(singleMsgProcessingDurationMs.toLong())
+    }
+
+    override fun stop() {
+        stopped = true
     }
 
     override fun updateRecordProcessingDuration(durationMs: Int) {
