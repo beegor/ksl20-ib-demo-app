@@ -10,7 +10,7 @@ import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
-class SampleProducer(private val topic: String, var produceSpeedMsgPerSec: Int = 1) {
+class SampleProducer(val topic: String, var produceSpeedMsgPerSec: Int = 1) {
 
     private val stopped = AtomicBoolean(false)
     private val producer: KafkaProducer<String, String>

@@ -47,10 +47,11 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
     override fun startConsuming() {
         thread {
             try {
-                consumer.subscribe(Collections.singleton(topic), object : ConsumerRebalanceListener {
-                    override fun onPartitionsAssigned(partitions: Collection<TopicPartition>) = partitionsAssigned(partitions)
-                    override fun onPartitionsRevoked(partitions: Collection<TopicPartition>) = partitionsRevoked(partitions)
-                })
+                consumer.subscribe(Collections.singleton(topic),
+                        object : ConsumerRebalanceListener {
+                            override fun onPartitionsAssigned(partitions: Collection<TopicPartition>) = partitionsAssigned(partitions)
+                            override fun onPartitionsRevoked(partitions: Collection<TopicPartition>) = partitionsRevoked(partitions)
+                        })
 
                 while (!stopped.get()) {
                     val records = consumer.poll(Duration.of(1000, ChronoUnit.MILLIS))
@@ -109,6 +110,13 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
 
     private fun resumePartitions() {
         synchronized(partitionsToResume) {
+            //todo check that and explain in presentation slide
+            // there might be partitions that were read from, associated task finished and added partition to  partitionsToResume list,
+            // but in the mean time rebalance happened and that partition might not be assigned any more, so we must not resume it
+            // that's why we remove all partitions that are not currently assigned
+            partitionsToResume.removeIf { !consumer.assignment().contains(it) }
+
+            // now we can resume
             consumer.resume(partitionsToResume)
             partitionsToResume.clear()
         }
@@ -135,14 +143,17 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
     private fun partitionsRevoked(partitions: Collection<TopicPartition>) {
 
         log.info("Partitions revoked: {}", partitions)
+
         val revokedPartitionOffsets = mutableMapOf<TopicPartition, OffsetAndMetadata>()
-        for (partition in partitions) {
+
+        for (partition in activeWorkers.keys()) {
             val task = activeWorkers[partition]
             task?.stop()
             val offset = offsetsToCommit.remove(partition)
             if (offset != null)
                 revokedPartitionOffsets[partition] = offset
         }
+
         try {
             consumer.commitSync(revokedPartitionOffsets)
         } catch (e: Exception) {
