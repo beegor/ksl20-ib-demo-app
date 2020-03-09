@@ -30,6 +30,13 @@ class ProducerController {
         return ProducerInfo(id, topic, producer.produceSpeedMsgPerSec)
     }
 
+    @GetMapping("/stop/{producerId}")
+    fun stopConsumerApp(@PathVariable producerId: String): Boolean {
+        val producer = this.producers.remove(producerId)
+        producer?.stopProducing()
+        return producer != null
+    }
+
 
     @GetMapping("/list")
     fun listProducers(): Collection<ProducerInfo> {

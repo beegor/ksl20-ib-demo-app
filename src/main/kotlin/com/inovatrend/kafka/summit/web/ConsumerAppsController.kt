@@ -1,6 +1,7 @@
 package com.inovatrend.kafka.summit.web
 
-import com.inovatrend.kafka.summit.ConsumerAppImpl
+
+import com.inovatrend.kafka.summit.ConsumerAppType
 import com.inovatrend.kafka.summit.service.ConsumerApp
 import com.inovatrend.kafka.summit.service.fork_join.ForkJoinConsumerApp
 import com.inovatrend.kafka.summit.service.fully_decoupled.FullyDecoupledConsumerApp
@@ -10,13 +11,17 @@ import com.inovatrend.kafka.summit.web.data.PollInfo
 import com.inovatrend.kafka.summit.web.data.WorkerInfo
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
-import java.time.Instant
 import java.time.LocalDateTime
-import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicInteger
+
+
+private const val timeFrameDurationMS = 100L
+private const val timeLineLengthMS = 10_000L
+
 
 @RestController
 @CrossOrigin("*")
@@ -24,44 +29,45 @@ import java.util.concurrent.atomic.AtomicInteger
 class ConsumerAppsController {
 
     private val log = LoggerFactory.getLogger(ConsumerAppsController::class.java)
-
     var consumerApps = mutableMapOf<String, ConsumerApp>()
+    private val idGenerator = AtomicInteger(1)
 
-    private val timeFrameDurationMS = 100L
-    private val timeLineLengthMS = 10_000L
-
-    private val idGenerator = AtomicInteger(1);
 
     @GetMapping("/list-types")
-    fun chooseConsumerApp(model: Model): List<ConsumerAppImpl> {
-        return ConsumerAppImpl.values().asList()
+    fun chooseConsumerApp(model: Model): List<ConsumerAppType> {
+        return ConsumerAppType.values().asList()
     }
 
 
     @GetMapping("/list")
     fun listConsumers(): Collection<ConsumerAppInfo> {
         return consumerApps.map {
-            val impl = when (it.value) {
-                is ForkJoinConsumerApp -> ConsumerAppImpl.FORK_JOIN
-                is FullyDecoupledConsumerApp -> ConsumerAppImpl.FULLY_DECOUPLED
-                else -> throw RuntimeException("Unknown ConsumerApp implementation!")
-            }
+            val impl = getConsumerAppImpl(it.value)
             ConsumerAppInfo(impl, it.key)
         }
     }
 
+    private fun getConsumerAppImpl(app: ConsumerApp): ConsumerAppType {
+        val impl = when (app) {
+            is ForkJoinConsumerApp -> ConsumerAppType.FORK_JOIN
+            is FullyDecoupledConsumerApp -> ConsumerAppType.FULLY_DECOUPLED
+            else -> throw RuntimeException("Unknown ConsumerApp implementation!")
+        }
+        return impl
+    }
+
 
     @GetMapping("/start")
-    fun startConsumerApp(@RequestParam impl: ConsumerAppImpl): Map<String, String> {
+    fun startConsumerApp(@RequestParam impl: ConsumerAppType): Map<String, String> {
 
         val consumerApp: ConsumerApp
         when (impl) {
-            ConsumerAppImpl.FORK_JOIN -> {
+            ConsumerAppType.FORK_JOIN -> {
                 log.info("Starting FORK JOIN implementation")
                 consumerApp = ForkJoinConsumerApp("ksl20-demo", "ksl20-input-topic", 1000)
                 consumerApp.startConsuming()
             }
-            ConsumerAppImpl.FULLY_DECOUPLED -> {
+            ConsumerAppType.FULLY_DECOUPLED -> {
                 log.info("Starting FULLY DECOUPLED implementation")
                 consumerApp = FullyDecoupledConsumerApp("ksl20-demo", "ksl20-input-topic", 1000)
                 consumerApp.startConsuming()
@@ -73,14 +79,29 @@ class ConsumerAppsController {
     }
 
 
+    @GetMapping("/stop/{consumerAppId}")
+    fun stopConsumerApp(@PathVariable consumerAppId: String): Boolean {
+        val consumerApp = this.consumerApps.remove(consumerAppId)
+        consumerApp?.stopConsuming()
+        return consumerApp != null
+    }
+
+
+    var endTime = LocalDateTime.now()
+    @Scheduled(fixedRate = timeFrameDurationMS)
+    fun updateEndTime() {
+        endTime = endTime.plusNanos(timeFrameDurationMS * 1_000_000)
+    }
+
     @GetMapping("/poll-history/{consumerId}")
     fun getPollHistory(@PathVariable consumerId: String): List<PollInfo> {
 
+        log.info("POll history called!")
         val consumerApp = consumerApps[consumerId] ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val pollHistory = consumerApp.getPollHistory() ?: listOf()
         val pollMap = mutableListOf<PollInfo>()
         val frames = timeLineLengthMS / timeFrameDurationMS
-        var end = LocalDateTime.ofInstant(Instant.ofEpochMilli((System.currentTimeMillis() / 30L) * 30L), ZoneId.systemDefault())
+        var end = LocalDateTime.from(endTime)
         for (i in 0..frames) {
             val tfDurationNanos = timeFrameDurationMS * 1_000_000
             val start = end.minusNanos(tfDurationNanos)
@@ -97,12 +118,17 @@ class ConsumerAppsController {
     }
 
 
+
     @GetMapping("/state/{consumerId}")
     fun getWorkersInfo(@PathVariable consumerId: String): ConsumingStateData {
         val consumerApp = consumerApps[consumerId] ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val workers = consumerApp.getActiveWorkers() ?: listOf()
         val lastPollRecordsCount = consumerApp.getLastPollRecordsCount() ?: 0
-        return ConsumingStateData(workers.map { WorkerInfo(it) }, lastPollRecordsCount, consumerApp.getRecordProcessingDuration())
+        return ConsumingStateData(
+                consumerId,
+                getConsumerAppImpl(consumerApp),
+                workers.map { WorkerInfo(it) },
+                lastPollRecordsCount, consumerApp.getRecordProcessingDuration())
     }
 
 

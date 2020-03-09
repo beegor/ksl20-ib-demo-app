@@ -1,5 +1,5 @@
 package com.inovatrend.kafka.summit
 
-enum class ConsumerAppImpl {
+enum class ConsumerAppType {
     FORK_JOIN, FULLY_DECOUPLED
 }
