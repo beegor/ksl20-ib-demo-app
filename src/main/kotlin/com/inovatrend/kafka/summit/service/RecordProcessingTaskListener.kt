@@ -6,6 +6,6 @@ interface RecordProcessingTaskListener {
 
     fun singleRecordProcessingFinished(topicPartition: TopicPartition, offset: Long)
 
-    fun taskFinished(topicPartition: TopicPartition, offset: Long)
+    fun taskFinished(taskId: String, topicPartition: TopicPartition, offset: Long)
 
 }

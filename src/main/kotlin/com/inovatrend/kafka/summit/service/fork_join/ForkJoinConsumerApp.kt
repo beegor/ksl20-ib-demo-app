@@ -21,7 +21,7 @@ class ForkJoinConsumerApp(consumerGroup: String,
 
     private val consumer: KafkaConsumer<String, String>
     private val stopped = AtomicBoolean(false)
-    private val executor = Executors.newWorkStealingPool(10)
+    private val executor = Executors.newWorkStealingPool(8)
     private val activeWorkers = mutableListOf<RecordProcessingTask>()
     private var lastPollRecordsCount = 0
     private val pollHistory = mutableListOf<LocalDateTime>()
@@ -33,6 +33,7 @@ class ForkJoinConsumerApp(consumerGroup: String,
         config[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
         config[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
         config[ConsumerConfig.GROUP_ID_CONFIG] = consumerGroup
+        config[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
         config[ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG] = 2000
         consumer = KafkaConsumer(config)
     }
@@ -45,15 +46,15 @@ class ForkJoinConsumerApp(consumerGroup: String,
                     updatePollMetrics()
                     val records = consumer.poll(Duration.of(1000, ChronoUnit.MILLIS))
                     this.lastPollRecordsCount = records.count()
-                    log.info("Fetched {} records", lastPollRecordsCount)
+                    log.debug("Fetched {} records", lastPollRecordsCount)
                     val tasks = records.partitions().map { partition ->
                         val partitionRecords = records.records(partition)
                         val worker = ForkJoinRecordProcessingTask(partition, partitionRecords, recordProcessingDurationMs)
                         worker.apply { activeWorkers.add(this) }
                     }
-                    log.info("Invoking executors start, tasks : {}", tasks.size)
+                    log.debug("Invoking executors start, tasks : {}", tasks.size)
                     executor.invokeAll(tasks)
-                    log.info("Invoking executors finish")
+                    log.debug("Invoking executors finish")
                     activeWorkers.clear()
                 }
             } catch (we: WakeupException) {
@@ -86,7 +87,7 @@ class ForkJoinConsumerApp(consumerGroup: String,
     override fun getRecordProcessingDuration() = this.recordProcessingDurationMs
 
     override fun updateRecordProcessingDuration(durationMs: Int) {
-        log.info("Updating record processing duration: {} ms", durationMs)
+        log.debug("Updating record processing duration: {} ms", durationMs)
         this.recordProcessingDurationMs = durationMs
         activeWorkers.forEach { it.updateRecordProcessingDuration(durationMs) }
     }

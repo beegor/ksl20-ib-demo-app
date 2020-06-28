@@ -5,6 +5,7 @@ import com.inovatrend.kafka.summit.ConsumerAppType
 import com.inovatrend.kafka.summit.service.ConsumerApp
 import com.inovatrend.kafka.summit.service.fork_join.ForkJoinConsumerApp
 import com.inovatrend.kafka.summit.service.fully_decoupled.FullyDecoupledConsumerApp
+import com.inovatrend.kafka.summit.service.fully_decoupled.MultithreadedKafkaConsumer
 import com.inovatrend.kafka.summit.web.data.ConsumerAppInfo
 import com.inovatrend.kafka.summit.web.data.ConsumingStateData
 import com.inovatrend.kafka.summit.web.data.PollInfo
@@ -50,7 +51,7 @@ class ConsumerAppsController {
     private fun getConsumerAppImpl(app: ConsumerApp): ConsumerAppType {
         val impl = when (app) {
             is ForkJoinConsumerApp -> ConsumerAppType.FORK_JOIN
-            is FullyDecoupledConsumerApp -> ConsumerAppType.FULLY_DECOUPLED
+            is FullyDecoupledConsumerApp, is MultithreadedKafkaConsumer -> ConsumerAppType.FULLY_DECOUPLED
             else -> throw RuntimeException("Unknown ConsumerApp implementation!")
         }
         return impl
@@ -60,20 +61,22 @@ class ConsumerAppsController {
     @GetMapping("/start")
     fun startConsumerApp(@RequestParam impl: ConsumerAppType): Map<String, String> {
 
+        val consumerAppId = idGenerator.getAndIncrement().toString()
         val consumerApp: ConsumerApp
         when (impl) {
             ConsumerAppType.FORK_JOIN -> {
-                log.info("Starting FORK JOIN implementation")
+                log.debug("Starting FORK JOIN implementation")
                 consumerApp = ForkJoinConsumerApp("ksl20-demo", "ksl20-input-topic", 1000)
                 consumerApp.startConsuming()
             }
             ConsumerAppType.FULLY_DECOUPLED -> {
-                log.info("Starting FULLY DECOUPLED implementation")
-                consumerApp = FullyDecoupledConsumerApp("ksl20-demo", "ksl20-input-topic", 1000)
+                log.debug("Starting FULLY DECOUPLED implementation")
+//                consumerApp = FullyDecoupledConsumerApp(consumerAppId, "ksl20-demo", "ksl20-input-topic", 1000)
+                consumerApp = MultithreadedKafkaConsumer(consumerAppId, "ksl20-demo", "ksl20-input-topic", 10)
                 consumerApp.startConsuming()
             }
         }
-        val consumerAppId = idGenerator.getAndIncrement().toString()
+
         consumerApps[consumerAppId] = consumerApp
         return mapOf(Pair("result", "OK"), Pair("consumerAppId", consumerAppId))
     }
@@ -96,7 +99,6 @@ class ConsumerAppsController {
     @GetMapping("/poll-history/{consumerId}")
     fun getPollHistory(@PathVariable consumerId: String): List<PollInfo> {
 
-        log.info("POll history called!")
         val consumerApp = consumerApps[consumerId] ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val pollHistory = consumerApp.getPollHistory() ?: listOf()
         val pollMap = mutableListOf<PollInfo>()

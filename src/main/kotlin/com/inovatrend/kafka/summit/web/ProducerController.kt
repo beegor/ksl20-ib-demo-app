@@ -1,6 +1,6 @@
 package com.inovatrend.kafka.summit.web
 
-import com.inovatrend.kafka.summit.service.SampleProducer
+import com.inovatrend.kafka.summit.service.SimpleProducer
 import com.inovatrend.kafka.summit.web.data.ProducerInfo
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @RequestMapping("/producer")
 class ProducerController {
 
-    var producers = mutableMapOf<String, SampleProducer>()
+    var producers = mutableMapOf<String, SimpleProducer>()
     private val idGenerator = AtomicInteger(1);
 
     private val log = LoggerFactory.getLogger(ProducerController::class.java)
@@ -22,11 +22,11 @@ class ProducerController {
     @GetMapping("/start")
     fun startProducer(topic: String): ProducerInfo {
 
-        val producer = SampleProducer(topic, 0)
+        val producer = SimpleProducer(topic, 0)
         val id = idGenerator.getAndIncrement().toString()
         producers[id] = producer
         producer.startProducing()
-        log.info("Started producer with id: {}", id)
+        log.debug("Started producer with id: {}", id)
         return ProducerInfo(id, topic, producer.produceSpeedMsgPerSec)
     }
 

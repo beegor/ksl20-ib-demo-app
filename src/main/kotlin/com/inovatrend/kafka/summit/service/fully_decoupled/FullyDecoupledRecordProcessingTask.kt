@@ -1,26 +1,43 @@
 package com.inovatrend.kafka.summit.service.fully_decoupled
 
 import com.inovatrend.kafka.summit.service.RecordProcessingTask
-import com.inovatrend.kafka.summit.service.RecordProcessingTaskListener
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.slf4j.LoggerFactory
+import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
-class FullyDecoupledRecordProcessingTask(private val partition: TopicPartition,
+val processedMessages = Collections.synchronizedMap(mutableMapOf<String, String>())
+
+class FullyDecoupledRecordProcessingTask(private val consumerAppId: String,
+                                         private val partition: TopicPartition,
                                          private val records: List<ConsumerRecord<String, String>>,
-                                         var singleMsgProcessingDurationMs: Int,
-                                         val listener: RecordProcessingTaskListener) : Runnable, RecordProcessingTask {
+                                         var singleMsgProcessingDurationMs: Int
+) : Runnable, RecordProcessingTask {
 
     private val log = LoggerFactory.getLogger(FullyDecoupledRecordProcessingTask::class.java)
-    private val currentOffset = AtomicLong()
+    private val currentOffset = AtomicLong(-1)
     private var processedRecordsCount = 0
     private var stopped = false
-    private val completition = CompletableFuture<Boolean>()
+    private var started = false
+    private val completion = CompletableFuture<Long>()
+    private var finished = false
+    private val myId = UUID.randomUUID().toString()
 
+    private val startStopLock = ReentrantLock()
 
     override fun run() {
+
+        startStopLock.withLock {
+            if (stopped) {
+                log.info("Task stopped before processing started: {}  partition: {}", myId, partition)
+                return
+            }
+            started = true
+        }
 
         for (record in records) {
             if (stopped)
@@ -28,20 +45,45 @@ class FullyDecoupledRecordProcessingTask(private val partition: TopicPartition,
             processRecord(record)
             currentOffset.set(record.offset() + 1)
             processedRecordsCount++
-            listener.singleRecordProcessingFinished(partition, currentOffset.get())
+
+            val alreadyProcessedByApp = processedMessages[record.value()]
+            if (alreadyProcessedByApp != null)
+                log.warn("Duplicate processing detected! First processed by consumer app {}, then by consumer app {}: {}", alreadyProcessedByApp, consumerAppId, record.value())
+            processedMessages[record.value()] = consumerAppId
+            log.info("Total processed messages: {}", processedMessages.size)
         }
-        listener.taskFinished(partition, currentOffset.get())
-        completition.complete(true)
+        finished = true
+        completion.complete(currentOffset.get())
     }
 
-    override fun stop() {
-        this.stopped = true
-        completition.get()
+
+    override fun getCurrentOffset(): Long {
+        return currentOffset.get()
     }
 
+    fun stop() {
+        log.info("Stopping task: {}  partition: {}", myId, partition)
+        startStopLock.withLock {
+            this.stopped = true
+            if (!started) {
+                log.info("Task stopped while in thread pool queue: {}  partition: {}", myId, partition)
+                finished = true
+                completion.complete(-1)
+            }
+        }
+        stopped = true;
+    }
+
+    fun waitForCompletion(): Long {
+        return completion.get()
+    }
+
+    override fun isFinished(): Boolean {
+        return finished
+    }
 
     private fun processRecord(record: ConsumerRecord<String, String>) {
-        log.info("Processing record: {}", record)
+        log.debug("Processing record: {}", record)
         Thread.sleep(singleMsgProcessingDurationMs.toLong())
     }
 
@@ -56,4 +98,5 @@ class FullyDecoupledRecordProcessingTask(private val partition: TopicPartition,
 
     override fun getTopicPartition() = partition
 
+    override fun getId() = myId
 }

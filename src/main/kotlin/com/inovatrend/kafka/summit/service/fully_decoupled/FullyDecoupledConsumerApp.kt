@@ -1,8 +1,6 @@
 package com.inovatrend.kafka.summit.service.fully_decoupled
 
 import com.inovatrend.kafka.summit.service.ConsumerApp
-import com.inovatrend.kafka.summit.service.RecordProcessingTask
-import com.inovatrend.kafka.summit.service.RecordProcessingTaskListener
 import org.apache.kafka.clients.consumer.*
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.WakeupException
@@ -12,26 +10,29 @@ import java.time.Duration
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 
-class FullyDecoupledConsumerApp(consumerGroup: String,
+class FullyDecoupledConsumerApp(private val consumerAppId: String,
+                                consumerGroup: String,
                                 private val topic: String,
-                                private var recordProcessingDurationMs: Int) : ConsumerApp, RecordProcessingTaskListener {
+                                private var recordProcessingDurationMs: Int) : ConsumerApp {
 
     private val consumer: KafkaConsumer<String, String>
     private val stopped = AtomicBoolean(false)
     private val executor = Executors.newFixedThreadPool(8)
-    private val activeWorkers = ConcurrentHashMap<TopicPartition, RecordProcessingTask>()
-    private val offsetsToCommit = Collections.synchronizedMap(mutableMapOf<TopicPartition, OffsetAndMetadata>())
-    private val partitionsToResume = Collections.synchronizedList(mutableListOf<TopicPartition>())
+
+    private val activeWorkers = mutableMapOf<TopicPartition, FullyDecoupledRecordProcessingTask>()
+    private val offsetsToCommit = mutableMapOf<TopicPartition, OffsetAndMetadata>()
+
+
     private var lastCommitTime = System.currentTimeMillis()
     private var lastPollRecordsCount = 0
     private val pollHistory = mutableListOf<LocalDateTime>()
-    private val log = LoggerFactory.getLogger(FullyDecoupledConsumerApp::class.java)
+    private val log = LoggerFactory.getLogger("FullyDecoupledConsumerApp-$consumerAppId")
+
 
     init {
 
@@ -40,12 +41,14 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
         config[ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
         config[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
         config[ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG] = false
+        config[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
         config[ConsumerConfig.GROUP_ID_CONFIG] = consumerGroup
         consumer = KafkaConsumer(config)
     }
 
     override fun startConsuming() {
         thread {
+
             try {
                 consumer.subscribe(Collections.singleton(topic),
                         object : ConsumerRebalanceListener {
@@ -54,34 +57,43 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
                         })
 
                 while (!stopped.get()) {
-                    val records = consumer.poll(Duration.of(1000, ChronoUnit.MILLIS))
+                    val records = consumer.poll(Duration.of(100, ChronoUnit.MILLIS))
                     updatePollMetrics(records.count())
                     handleFetchedRecords(records)
                     commitOffsetsIfTimeHasCome()
-                    resumePartitions()
-                    Thread.sleep(100)
+                    handleActiveTasks()
+                    Thread.sleep(5)
                 }
             } catch (we: WakeupException) {
-                if (!stopped.get()) throw we
-            } catch (e: Exception) {
-                log.error("Failed to consume messages!", e)
+                if (!stopped.get())
+                    throw we
             } finally {
+                //handleShutdown()
                 consumer.close()
             }
         }
     }
+
 
     /**
      * Called from main consumer thread.
      * Groups records by partitions, creates tasks and submits them to executor
      */
     private fun handleFetchedRecords(records: ConsumerRecords<String, String>) {
-        records.partitions().forEach { partition ->
-            val partitionRecords = records.records(partition)
-            val worker = FullyDecoupledRecordProcessingTask(partition, partitionRecords, recordProcessingDurationMs, this)
-            consumer.pause(listOf(partition))
-            activeWorkers[partition] = worker
-            executor.submit(worker)
+        if (records.count() > 0) {
+            val partitionsToPause = mutableListOf<TopicPartition>()
+            log.info("Handling fetched records")
+            records.partitions().forEach { partition ->
+                val partitionRecords = records.records(partition)
+                val worker = FullyDecoupledRecordProcessingTask(consumerAppId, partition, partitionRecords, recordProcessingDurationMs)
+                if (activeWorkers.containsKey(partition))
+                    log.error("This should not happen. Ever!")
+                partitionsToPause.add(partition)
+                executor.submit(worker)
+                activeWorkers[partition] = worker
+                log.info("Task {} submitted for partition {} by consumer app {}", worker.getId(), partition, consumerAppId)
+            }
+            consumer.pause(partitionsToPause)
         }
     }
 
@@ -94,67 +106,78 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
         val now = LocalDateTime.now()
         pollHistory.add(now)
         this.lastPollRecordsCount = recordsCount
-        log.info("Fetched {} records", lastPollRecordsCount)
+        log.debug("Fetched {} records", lastPollRecordsCount)
     }
 
-
-    private fun commitOffsetsIfTimeHasCome() {
-        val currentTimeMillis = System.currentTimeMillis()
-        if (currentTimeMillis - lastCommitTime > 5000) {
-            synchronized(offsetsToCommit) {
-                consumer.commitSync(offsetsToCommit)
-            }
-            lastCommitTime = currentTimeMillis
-        }
-    }
-
-    private fun resumePartitions() {
-        synchronized(partitionsToResume) {
-            //todo check that and explain in presentation slide
-            // there might be partitions that were read from, associated task finished and added partition to  partitionsToResume list,
-            // but in the mean time rebalance happened and that partition might not be assigned any more, so we must not resume it
-            // that's why we remove all partitions that are not currently assigned
-            partitionsToResume.removeIf { !consumer.assignment().contains(it) }
-
-            // now we can resume
-            consumer.resume(partitionsToResume)
-            partitionsToResume.clear()
-        }
-    }
-
-    override fun singleRecordProcessingFinished(topicPartition: TopicPartition, offset: Long) {
-        log.info("Single record from partition {} processing finished, offset: {}", topicPartition, offset)
-        offsetsToCommit[topicPartition] = OffsetAndMetadata(offset)
-    }
-
-    override fun taskFinished(topicPartition: TopicPartition, offset: Long) {
-        log.info("Task for partition {} finished", topicPartition)
-        offsetsToCommit[topicPartition] = OffsetAndMetadata(offset)
-        partitionsToResume.add(topicPartition)
-        activeWorkers.remove(topicPartition)
-    }
 
     override fun stopConsuming() {
-        log.info("Stopping consumer app!")
+        log.info("Stopping consumer app {}", consumerAppId)
         stopped.set(true)
         consumer.wakeup()
     }
 
+
+    private fun commitOffsetsIfTimeHasCome() {
+        try {
+            val currentTimeMillis = System.currentTimeMillis()
+            if (currentTimeMillis - lastCommitTime > 5000) {
+                if (offsetsToCommit.isNotEmpty()) {
+                    consumer.commitSync(offsetsToCommit)
+                    log.info("Committed offsets periodically: {}", offsetsToCommit.keys)
+                    offsetsToCommit.clear()
+                }
+                lastCommitTime = currentTimeMillis
+            }
+        } catch (e: Exception) {
+            log.error("Failed to commit offsets!", e)
+        }
+    }
+
+
+    private fun handleActiveTasks() {
+        val finishedTasksPartitions = mutableListOf<TopicPartition>()
+        activeWorkers.forEach { (partition, task) ->
+            if (task.isFinished())
+                finishedTasksPartitions.add(partition)
+            val offset = task.getCurrentOffset()
+            if (offset > 0)
+                offsetsToCommit[partition] = OffsetAndMetadata(offset)
+        }
+        finishedTasksPartitions.forEach { activeWorkers.remove(it) }
+        consumer.resume(finishedTasksPartitions)
+    }
+
+
     private fun partitionsRevoked(partitions: Collection<TopicPartition>) {
 
         log.info("Partitions revoked: {}", partitions)
+        val stoppedTask = mutableMapOf<TopicPartition, FullyDecoupledRecordProcessingTask>()
+
+        for (partition in partitions) {
+            val task = activeWorkers.remove(partition)
+            if (task != null) {
+                log.info("Stopping task {} for partition {}", task.getId(), task.getTopicPartition())
+                task.stop()
+                stoppedTask[partition] = task
+            }
+        }
+
+        stoppedTask.forEach { (partition, task) ->
+            val offset = task.waitForCompletion()
+            log.info("Task {} / {} completed with offset: {}", task.getId(), task.getTopicPartition(), offset)
+            if (offset > 0)
+                offsetsToCommit[partition] = OffsetAndMetadata(offset)
+        }
+
 
         val revokedPartitionOffsets = mutableMapOf<TopicPartition, OffsetAndMetadata>()
-
-        for (partition in activeWorkers.keys()) {
-            val task = activeWorkers[partition]
-            task?.stop()
+        for (partition in partitions) {
             val offset = offsetsToCommit.remove(partition)
             if (offset != null)
                 revokedPartitionOffsets[partition] = offset
         }
-
         try {
+            log.info("Committing offsets on revoke: {}", revokedPartitionOffsets)
             consumer.commitSync(revokedPartitionOffsets)
         } catch (e: Exception) {
             // todo Offsets commit failed! Is there something I can do about it? Nothing, I guess.
@@ -164,6 +187,9 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
 
     private fun partitionsAssigned(partitions: Collection<TopicPartition>) {
         log.info("Partitions assigned: {}", partitions)
+        // because  some partitions might be paused some time before then revoked by previous rebalance, so they never been resumed on consumer.
+        // now they are assigned again but they are still paused, so we need  to make sure we resume them
+        consumer.resume(partitions)
     }
 
     override fun getActiveWorkers() = activeWorkers.values.toList()
@@ -173,7 +199,7 @@ class FullyDecoupledConsumerApp(consumerGroup: String,
     override fun getRecordProcessingDuration() = this.recordProcessingDurationMs
 
     override fun updateRecordProcessingDuration(durationMs: Int) {
-        log.info("Updating record processing duration: {} ms", durationMs)
+        log.debug("Updating record processing duration: {} ms", durationMs)
         this.recordProcessingDurationMs = durationMs
         activeWorkers.values.forEach { it.updateRecordProcessingDuration(durationMs) }
     }

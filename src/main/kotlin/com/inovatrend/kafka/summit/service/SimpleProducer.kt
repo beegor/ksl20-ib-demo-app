@@ -5,17 +5,16 @@ import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.serialization.StringSerializer
 import org.slf4j.LoggerFactory
-import java.time.LocalDateTime
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
-class SampleProducer(val topic: String, var produceSpeedMsgPerSec: Int = 1) {
+class SimpleProducer(val topic: String, var produceSpeedMsgPerSec: Int = 1) {
 
     private val stopped = AtomicBoolean(false)
     private val producer: KafkaProducer<String, String>
 
-    private val log = LoggerFactory.getLogger(SampleProducer::class.java)
+    private val log = LoggerFactory.getLogger(SimpleProducer::class.java)
 
     init {
         val config = Properties()
@@ -42,12 +41,17 @@ class SampleProducer(val topic: String, var produceSpeedMsgPerSec: Int = 1) {
     private fun produceMessage() {
         val speedMsgPerSec = produceSpeedMsgPerSec
         if (speedMsgPerSec > 0) {
-            val message = "Message - ${LocalDateTime.now()}"
-            log.info("Producing message: {}", message)
+            val start = System.currentTimeMillis()
+            val message = "Message - ${System.nanoTime()} - ${UUID.randomUUID()}"
+            log.debug("Producing message: {}", message)
             producer.send(ProducerRecord(topic, null, message)).get()
             val delay = getDelay(speedMsgPerSec)
-            log.info("Producer delay: {}", delay)
-            Thread.sleep(delay)
+
+            val duration = System.currentTimeMillis() - start
+            val sleepTime = delay - duration
+            log.debug("Producer delay: {}, sleepTime: {}", delay, sleepTime)
+            if (sleepTime > 0)
+                Thread.sleep(sleepTime)
         } else Thread.sleep(1000)
     }
 
@@ -57,7 +61,6 @@ class SampleProducer(val topic: String, var produceSpeedMsgPerSec: Int = 1) {
     }
 
     fun updateSpeed(msgPerSec: Int) {
-        log.info("Updating producer speed to: {}", msgPerSec)
         this.produceSpeedMsgPerSec = msgPerSec
     }
 

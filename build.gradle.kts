@@ -5,7 +5,10 @@ plugins {
 	id("io.spring.dependency-management") version "1.0.9.RELEASE"
 	kotlin("jvm") version "1.3.61"
 	kotlin("plugin.spring") version "1.3.61"
+	id("java-library")
 }
+
+
 
 group = "com.inovatrend.kafka.summit"
 version = "0.0.1-SNAPSHOT"
@@ -37,3 +40,4 @@ tasks.withType<KotlinCompile> {
 		jvmTarget = "1.8"
 	}
 }
+

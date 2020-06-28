@@ -4,6 +4,7 @@ import com.inovatrend.kafka.summit.service.RecordProcessingTask
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.slf4j.LoggerFactory
+import java.util.*
 import java.util.concurrent.Callable
 import java.util.concurrent.atomic.AtomicLong
 
@@ -15,6 +16,9 @@ class ForkJoinRecordProcessingTask(private val partition: TopicPartition,
     private val currentOffset = AtomicLong()
     private var processedRecordsCount = 0
     private var stopped = false
+    private var finished = false
+
+    private val myId = UUID.randomUUID().toString()
 
 
     override fun call(): Int {
@@ -24,17 +28,23 @@ class ForkJoinRecordProcessingTask(private val partition: TopicPartition,
             currentOffset.set(record.offset())
             processedRecordsCount++
         }
+        finished = true
         return processedRecordsCount
     }
 
 
     private fun processRecord(record: ConsumerRecord<String, String>) {
-        log.info("Processing record: {}", record)
+        log.debug("Processing record: {}", record)
         Thread.sleep(singleMsgProcessingDurationMs.toLong())
     }
 
-    override fun stop() {
-        stopped = true
+    override fun getCurrentOffset(): Long {
+        return currentOffset.get()
+    }
+
+
+    override fun isFinished(): Boolean {
+        return finished
     }
 
     override fun updateRecordProcessingDuration(durationMs: Int) {
@@ -47,4 +57,5 @@ class ForkJoinRecordProcessingTask(private val partition: TopicPartition,
 
     override fun getTopicPartition() = partition
 
+    override fun getId() = myId
 }
