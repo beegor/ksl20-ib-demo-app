@@ -1,7 +1,6 @@
 package com.inovatrend.kafka.summit.service.fork_join
 
 import com.inovatrend.kafka.summit.service.ConsumerApp
-import com.inovatrend.kafka.summit.service.RecordProcessingTask
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.common.errors.WakeupException
@@ -22,7 +21,7 @@ class ForkJoinConsumerApp(consumerGroup: String,
     private val consumer: KafkaConsumer<String, String>
     private val stopped = AtomicBoolean(false)
     private val executor = Executors.newWorkStealingPool(8)
-    private val activeWorkers = mutableListOf<RecordProcessingTask>()
+    private val activeWorkers = mutableListOf<ForkJoinRecordProcessingTask>()
     private var lastPollRecordsCount = 0
     private val pollHistory = mutableListOf<LocalDateTime>()
     private val log = LoggerFactory.getLogger(ForkJoinConsumerApp::class.java)
@@ -77,6 +76,7 @@ class ForkJoinConsumerApp(consumerGroup: String,
     override fun stopConsuming() {
         stopped.set(true)
         consumer.wakeup()
+        activeWorkers.forEach { worker -> worker.stop() }
     }
 
 

@@ -21,10 +21,13 @@ class FullyDecoupledRecordProcessingTask(private val consumerAppId: String,
     private val log = LoggerFactory.getLogger(FullyDecoupledRecordProcessingTask::class.java)
     private val currentOffset = AtomicLong(-1)
     private var processedRecordsCount = 0
+    @Volatile
     private var stopped = false
+    @Volatile
     private var started = false
-    private val completion = CompletableFuture<Long>()
+    @Volatile
     private var finished = false
+    private val completion = CompletableFuture<Long>()
     private val myId = UUID.randomUUID().toString()
 
     private val startStopLock = ReentrantLock()

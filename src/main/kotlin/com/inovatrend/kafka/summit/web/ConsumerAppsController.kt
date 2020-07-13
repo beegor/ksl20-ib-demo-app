@@ -71,8 +71,8 @@ class ConsumerAppsController {
             }
             ConsumerAppType.FULLY_DECOUPLED -> {
                 log.debug("Starting FULLY DECOUPLED implementation")
-//                consumerApp = FullyDecoupledConsumerApp(consumerAppId, "ksl20-demo", "ksl20-input-topic", 1000)
-                consumerApp = MultithreadedKafkaConsumer(consumerAppId, "ksl20-demo", "ksl20-input-topic", 10)
+                consumerApp = FullyDecoupledConsumerApp(consumerAppId, "ksl20-demo", "ksl20-input-topic", 1000)
+//                consumerApp = MultithreadedKafkaConsumer(consumerAppId, "ksl20-demo", "ksl20-input-topic", 10)
                 consumerApp.startConsuming()
             }
         }

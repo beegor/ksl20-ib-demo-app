@@ -23,7 +23,8 @@ class ForkJoinRecordProcessingTask(private val partition: TopicPartition,
 
     override fun call(): Int {
         for (record in records) {
-            if (stopped) break
+            if (stopped)
+                break
             processRecord(record)
             currentOffset.set(record.offset())
             processedRecordsCount++
@@ -40,6 +41,11 @@ class ForkJoinRecordProcessingTask(private val partition: TopicPartition,
 
     override fun getCurrentOffset(): Long {
         return currentOffset.get()
+    }
+
+
+    fun stop() {
+        this.stopped = true
     }
 
 
