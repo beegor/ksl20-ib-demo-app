@@ -43,6 +43,7 @@ class FullyDecoupledConsumerApp(private val consumerAppId: String,
         config[ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG] = false
         config[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
         config[ConsumerConfig.GROUP_ID_CONFIG] = consumerGroup
+        config[ConsumerConfig.MAX_POLL_RECORDS_CONFIG] = 100
         consumer = KafkaConsumer(config)
     }
 
@@ -85,9 +86,7 @@ class FullyDecoupledConsumerApp(private val consumerAppId: String,
             log.info("Handling fetched records")
             records.partitions().forEach { partition ->
                 val partitionRecords = records.records(partition)
-                val worker = FullyDecoupledRecordProcessingTask(consumerAppId, partition, partitionRecords, recordProcessingDurationMs)
-                if (activeWorkers.containsKey(partition))
-                    log.error("This should not happen. Ever!")
+                val worker = FullyDecoupledRecordProcessingTask(partition, partitionRecords, recordProcessingDurationMs)
                 partitionsToPause.add(partition)
                 executor.submit(worker)
                 activeWorkers[partition] = worker

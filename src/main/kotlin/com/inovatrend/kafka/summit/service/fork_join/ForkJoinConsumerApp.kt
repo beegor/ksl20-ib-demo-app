@@ -33,7 +33,8 @@ class ForkJoinConsumerApp(consumerGroup: String,
         config[ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG] = StringDeserializer::class.java
         config[ConsumerConfig.GROUP_ID_CONFIG] = consumerGroup
         config[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
-        config[ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG] = 2000
+        config[ConsumerConfig.MAX_POLL_RECORDS_CONFIG] = 2000
+        config[ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG] = 10240
         consumer = KafkaConsumer(config)
     }
 

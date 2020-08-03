@@ -10,21 +10,22 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
-val processedMessages = Collections.synchronizedMap(mutableMapOf<String, String>())
 
-class FullyDecoupledRecordProcessingTask(private val consumerAppId: String,
-                                         private val partition: TopicPartition,
+class FullyDecoupledRecordProcessingTask(private val partition: TopicPartition,
                                          private val records: List<ConsumerRecord<String, String>>,
-                                         var singleMsgProcessingDurationMs: Int
+                                         private var singleMsgProcessingDurationMs: Int
 ) : Runnable, RecordProcessingTask {
 
     private val log = LoggerFactory.getLogger(FullyDecoupledRecordProcessingTask::class.java)
     private val currentOffset = AtomicLong(-1)
     private var processedRecordsCount = 0
+
     @Volatile
     private var stopped = false
+
     @Volatile
     private var started = false
+
     @Volatile
     private var finished = false
     private val completion = CompletableFuture<Long>()
@@ -48,12 +49,6 @@ class FullyDecoupledRecordProcessingTask(private val consumerAppId: String,
             processRecord(record)
             currentOffset.set(record.offset() + 1)
             processedRecordsCount++
-
-            val alreadyProcessedByApp = processedMessages[record.value()]
-            if (alreadyProcessedByApp != null)
-                log.warn("Duplicate processing detected! First processed by consumer app {}, then by consumer app {}: {}", alreadyProcessedByApp, consumerAppId, record.value())
-            processedMessages[record.value()] = consumerAppId
-            log.info("Total processed messages: {}", processedMessages.size)
         }
         finished = true
         completion.complete(currentOffset.get())

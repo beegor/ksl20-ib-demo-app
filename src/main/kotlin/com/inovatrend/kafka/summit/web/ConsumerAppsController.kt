@@ -5,7 +5,6 @@ import com.inovatrend.kafka.summit.ConsumerAppType
 import com.inovatrend.kafka.summit.service.ConsumerApp
 import com.inovatrend.kafka.summit.service.fork_join.ForkJoinConsumerApp
 import com.inovatrend.kafka.summit.service.fully_decoupled.FullyDecoupledConsumerApp
-import com.inovatrend.kafka.summit.service.fully_decoupled.MultithreadedKafkaConsumer
 import com.inovatrend.kafka.summit.web.data.ConsumerAppInfo
 import com.inovatrend.kafka.summit.web.data.ConsumingStateData
 import com.inovatrend.kafka.summit.web.data.PollInfo
@@ -51,7 +50,7 @@ class ConsumerAppsController {
     private fun getConsumerAppImpl(app: ConsumerApp): ConsumerAppType {
         val impl = when (app) {
             is ForkJoinConsumerApp -> ConsumerAppType.FORK_JOIN
-            is FullyDecoupledConsumerApp, is MultithreadedKafkaConsumer -> ConsumerAppType.FULLY_DECOUPLED
+            is FullyDecoupledConsumerApp -> ConsumerAppType.FULLY_DECOUPLED
             else -> throw RuntimeException("Unknown ConsumerApp implementation!")
         }
         return impl
@@ -100,7 +99,7 @@ class ConsumerAppsController {
     fun getPollHistory(@PathVariable consumerId: String): List<PollInfo> {
 
         val consumerApp = consumerApps[consumerId] ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        val pollHistory = consumerApp.getPollHistory() ?: listOf()
+        val pollHistory = consumerApp.getPollHistory()
         val pollMap = mutableListOf<PollInfo>()
         val frames = timeLineLengthMS / timeFrameDurationMS
         var end = LocalDateTime.from(endTime)
@@ -124,8 +123,8 @@ class ConsumerAppsController {
     @GetMapping("/state/{consumerId}")
     fun getWorkersInfo(@PathVariable consumerId: String): ConsumingStateData {
         val consumerApp = consumerApps[consumerId] ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        val workers = consumerApp.getActiveWorkers() ?: listOf()
-        val lastPollRecordsCount = consumerApp.getLastPollRecordsCount() ?: 0
+        val workers = consumerApp.getActiveWorkers()
+        val lastPollRecordsCount = consumerApp.getLastPollRecordsCount()
         return ConsumingStateData(
                 consumerId,
                 getConsumerAppImpl(consumerApp),
